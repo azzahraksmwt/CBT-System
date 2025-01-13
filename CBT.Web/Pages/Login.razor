@@ -1,0 +1,77 @@
+﻿@layout LoginLayout
+@page "/"
+
+@inject HttpClient HttpClient
+@inject NavigationManager NavigationManager
+@using Blazored.LocalStorage
+@inject ILocalStorageService _localStorage
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider _authenticationStateProvider
+
+
+
+<div class="login-container d-flex justify-content-center align-items-center">
+    <div class="login-card shadow-lg p-4 rounded">
+        <h2 class="text-center mb-4">Login</h2>
+        <EditForm Model="@loginModel" OnValidSubmit="@HandleLogin">
+            <div class="mb-3">
+                <label for="email" class="form-label">Email</label>
+                <InputText id="email" class="form-control" @bind-Value="@loginModel.Email" />
+            </div>
+            <div class="mb-3">
+                <label for="password" class="form-label">Password</label>
+                <InputText id="password" type="password" class="form-control" @bind-Value="@loginModel.Password" />
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Log In and Let’s Get Moving!</button>
+        </EditForm>
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert alert-danger mt-3">@errorMessage</div>
+        }
+    </div>
+</div>
+
+@code {
+    private LoginModel loginModel = new LoginModel();
+    private string? errorMessage;
+
+    private async Task HandleLogin()
+    {
+        try
+        {
+            var response = await HttpClient.PostAsJsonAsync("http://localhost:5234/api/Auth/authenticate", loginModel);
+            if (response.IsSuccessStatusCode)
+            {
+                var token = await response.Content.ReadFromJsonAsync<AuthResponse>();
+                await _localStorage.SetItemAsync("token", token?.Token);
+                await ((CustomAuthStateProvider)_authenticationStateProvider).LoggedIn();
+                Console.WriteLine($"Token: {token?.Token}");
+                NavigationManager.NavigateTo("/Dashboard");
+            }
+            else
+            {
+                var error = await response.Content.ReadAsStringAsync();
+                errorMessage = "Login failed: " + error;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Terjadi kesalahan: {ex.Message}";
+        }
+    }
+
+    private class LoginModel
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+    }
+
+    private class AuthResponse
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public string Email { get; set; }
+        public string Token { get; set; }
+    }
+}

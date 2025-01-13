@@ -1,0 +1,265 @@
+﻿@page "/QuestionForm/{id:int?}"
+@using System.Text.Json
+
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+
+<PageTitle>Question Form</PageTitle>
+
+<Breadcrumb BackTo="QuestionList" BackToTitle="Question List" CurrentPageTitle="Question Form"/>
+
+<div class="card mt-4 mb-4">
+    <div class="card-body">
+        <h4 class="mt-2" style="border-bottom: solid 3px; display: inline-block;">Question Form</h4>
+
+        @if (question == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            <EditForm Model="question" OnValidSubmit="HandleFormSubmit">
+                <div class="mt-3">
+                    <label>Question:</label>
+                    <InputText @bind-Value="question.question" class="form-control" />
+                </div>
+                <div class="mt-3">
+                    <label>Weight:</label>
+                    <InputNumber @bind-Value="question.weight" class="form-control" />
+                </div>
+                <div class="mt-3">
+                    <label>Topic:</label>
+                    <InputSelect @bind-Value="question.question_topic_id" class="form-control">
+                        <option value="" disabled selected>Select a topic</option>
+                        @foreach (var topic in questionTopics)
+                        {
+                            <option value="@topic.id">@topic.topic_name - @topic.difficulty_level</option>
+                        }
+                    </InputSelect>
+                </div>
+
+                <div class="mt-3">
+                    <h4 class="mt-3" style="border-bottom: solid 3px; display: inline-block;">Question Options</h4>
+
+                    <table class="table border mt-3">
+                        <thead>
+                            <tr>
+                                <th>Option</th>
+                                <th>Is Correct</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Add New Option Row -->
+                            <tr>
+                                <td><input type="text" @bind="newOption.option" placeholder="Option Text"  /></td>
+                                <td><input type="checkbox" @bind="newOption.IsCorrect" /></td>
+                                <td>
+                                    <button type="button" class="btn btn-primary" @onclick="AddOption">Add</button>
+                                </td>
+                            </tr>
+
+                            @if (question.question_options == null || !question.question_options.Any())
+                            {
+                                <tr>
+                                    <td colspan="3"><em>No options available</em></td>
+                                </tr>
+                            }
+                            else
+                            {
+                                <!-- Display Existing Options -->
+                                @foreach (var option in question.question_options)
+                                {
+                                    <tr>
+                                        @if (editOption != null && editOption.id == option.id)
+                                        {
+                                            <!-- Edit Row -->
+                                            <td><input type="text" @bind="editOption.option" /></td>
+                                            <td><input type="checkbox" @bind="editOption.IsCorrect" /></td>
+                                            <td>
+                                                <button class="btn btn-success" @onclick="SaveEdit">Save</button>
+                                                <button class="btn btn-secondary" @onclick="CancelEdit">Cancel</button>
+                                            </td>
+                                        }
+                                        else
+                                        {
+                                            <!-- Display Row -->
+                                            <td>@option.option</td>
+                                            <td>@(option.IsCorrect ? "Yes" : "No")</td>
+                                            <td>
+                                                <button class="btn btn-warning" @onclick="() => EditOption(option)">Edit</button>
+                                                <button type="button" class="btn btn-danger" @onclick="() => RemoveOption(option.id)">Remove</button>
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <button type="submit" class="btn btn-primary mt-3">Submit</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private QuestionVM? question;
+    private List<QuestionTopicVM>? questionTopics;
+
+    [Parameter] public int? id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadQuestionTopicsAsync();
+
+        if (id is null)
+        {
+            question = new QuestionVM();
+        }
+        else
+        {
+            await LoadQuestionAsync();
+        }
+    }
+
+    private async Task LoadQuestionAsync()
+    {
+        try
+        {
+            question = await Http.GetFromJsonAsync<QuestionVM>($"http://localhost:5234/api/Question/{id}") ?? new QuestionVM();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading question: {ex.Message}");
+        }
+    }
+
+    private async Task LoadQuestionTopicsAsync()
+    {
+        questionTopics = await Http.GetFromJsonAsync<List<QuestionTopicVM>>("http://localhost:5234/api/QuestionTopic") ?? new List<QuestionTopicVM>();
+    }
+
+    private async Task HandleFormSubmit()
+    {
+        try
+        {
+            HttpResponseMessage response = null;
+
+            if (id is null)
+            {
+                question.question_options.ForEach(option => option.id = 0);
+                await Http.PostAsJsonAsync("http://localhost:5234/api/Question", question);
+            }
+            else
+            {
+                await Http.PutAsJsonAsync($"http://localhost:5234/api/Question/{id}", question);
+            }
+
+            NavigationManager.NavigateTo("/QuestionList");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+    private QuestionOption newOption = new QuestionOption();
+    private QuestionOption? editOption;
+
+    private void AddOption()
+    {
+        if (!string.IsNullOrWhiteSpace(newOption.option))
+        {
+            question.question_options ??= new List<QuestionOption>();
+
+            var newId = question.question_options.Count > 0 ? question.question_options.Max(o => o.id) + 1 : 1;
+
+            question.question_options.Add(new QuestionOption
+                {
+                    id = newId,
+                    option = newOption.option,
+                    IsCorrect = newOption.IsCorrect,
+                    question_id = question.id
+                });
+
+            newOption = new QuestionOption(); 
+        }
+        else
+        {
+            Console.WriteLine("Option text cannot be empty");
+        }
+    }
+
+    private void EditOption(QuestionOption option)
+    {
+        editOption = new QuestionOption
+            {
+                id = option.id,
+                option = option.option,
+                IsCorrect = option.IsCorrect,
+                question_id = option.question_id
+            };
+    }
+
+    private void SaveEdit()
+    {
+        if (editOption != null)
+        {
+            var existingOption = question.question_options.FirstOrDefault(o => o.id == editOption.id);
+            if (existingOption != null)
+            {
+                existingOption.option = editOption.option;
+                existingOption.IsCorrect = editOption.IsCorrect;
+            }
+            editOption = null;
+        }
+    }
+
+    private void CancelEdit()
+    {
+        editOption = null;
+    }
+
+    private void RemoveOption(int id)
+    {
+        var option = question.question_options.FirstOrDefault(o => o.id == id);
+        if (option != null)
+        {
+            question.question_options.Remove(option);
+        }
+    }
+
+    public class QuestionVM
+    {
+        public int id { get; set; } = 0;
+        public string? question { get; set; }
+        public int weight { get; set; }
+        public int question_topic_id { get; set; }
+        public DateTime created_at { get; set; }
+        public DateTime? updated_at { get; set; }
+        public string? updated_by { get; set; }
+        public DateTime? deleted_at { get; set; }
+        public List<QuestionOption> question_options { get; set; } = new();
+    }
+
+    public class QuestionTopicVM
+    {
+        public int id { get; set; }
+        public string? topic_name { get; set; }
+        public string? difficulty_level { get; set; }
+    }
+
+    public class QuestionOption
+    {
+        public int id { get; set; }
+        public int question_id { get; set; }
+        public string option { get; set; } = string.Empty;
+        public bool IsCorrect { get; set; }
+        public DateTime? created_at { get; set; }
+        public DateTime? updated_at { get; set; }
+        public string? updated_by { get; set; }
+        public DateTime? deleted_at { get; set; }
+    }
+}

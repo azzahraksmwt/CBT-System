@@ -1,0 +1,286 @@
+﻿@page "/Dashboard"
+
+@using Microsoft.JSInterop
+@using ChartJs.Blazor.PieChart
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.IdentityModel.Tokens.Jwt
+@inject HttpClient Http
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="card mt-4">
+    <div class="card-body">
+        <TitleView text="Dashboard" />
+
+        @if (questionTopics == null || schedules == null || testResults == null || userManagements == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            var filteredTopics = GetFilteredTopics();
+
+            var user = userManagements.FirstOrDefault(u => u.id == userId);
+            var userRole = user?.role;
+
+            if (!filteredTopics.Any())
+            {
+                <p>No topics with schedules available.</p>
+            }
+            else
+            {
+                <table class="table border mt-3">
+                    <thead>
+                        <tr>
+                            <th class="text-center">Topic</th>
+                            <th class="text-center">Start Date</th>
+                            <th class="text-center">End Date</th>
+                            <th class="text-center">Status</th>
+                            <th class="text-end me-5 pe-5">Action</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var topic in filteredTopics)
+                        {
+                            var schedule = schedules.FirstOrDefault(s => s.question_topic_id == topic.id);
+                            var collapseId = $"collapseTopic{topic.id}";
+
+                            <tr>
+                                <td>@topic.topic_name - @topic.difficulty_level</td>
+                                <td class="text-center">@schedule?.start_date.ToString("dd/MM/yyyy")</td>
+                                <td class="text-center">@schedule?.end_date.ToString("dd/MM/yyyy")</td>
+
+                                <td class="text-center">
+                                    @if (schedule != null)
+                                    {
+                                        string status = GetTopicStatus(schedule.end_date);
+                                        string statusClass = status switch
+                                        {
+                                            "Active" => "text-success",      
+                                            "Completed" => "text-muted",      
+                                            _ => "text-warning"               
+                                        };
+
+                                        <span class="@statusClass">@status</span>
+                                    }
+                                </td>
+
+                                <!-- Cek apakah user adalah participant sebelum menampilkan tombol Action -->
+                                @if (userRole == "participant")
+                                {
+                                    <td class="text-center">
+                                        <span class="d-flex flex-row justify-content-end">
+                                            @if (GetTopicStatus(schedule?.end_date) == "Completed")
+                                            {
+                                                <button class="btn btn-secondary d-flex align-items-center justify-content-center" disabled>
+                                                    <i class="bi bi-play-fill me-2"></i> Let’s Start!
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <NavLink class="btn btn-primary d-flex align-items-center justify-content-center" href="@($"Test/{topic.id}")">
+                                                    <i class="bi bi-play-fill me-2"></i> Let’s Start!
+                                                </NavLink>
+                                            }
+                                        </span>
+                                    </td>
+                                }
+                                else
+                                {
+                                    <td class="text-center">
+                                        <span class="d-flex flex-row text-muted justify-content-end">Action restricted</span>
+                                    </td>
+                                }
+
+                                <td class="text-center">
+                                    <button class="btn btn-link" type="button" data-bs-toggle="collapse" data-bs-target="#@collapseId" aria-expanded="false" aria-controls="@collapseId">
+                                        <i class="bi bi-caret-down-fill"></i>
+                                    </button>
+                                </td>
+                            </tr>
+
+                            <!-- Accordion Row -->
+                            <tr class="collapse" id="@collapseId">
+                                <td colspan="5">
+                                    <div class="card shadow-sm border-1 p-3">
+                                        <div class="row">
+                                            <div class="col-md-4">
+                                                @if (topicPieConfigs.TryGetValue(topic.id, out var pieConfig))
+                                                {
+                                                    <Chart Config="pieConfig"></Chart>
+                                                }
+                                            </div>
+                                            <div class="col-md-8">
+                                                <table class="table border">
+                                                    <thead>
+                                                        <tr>
+                                                            <th class="text-center">Participant</th>
+                                                            <th class="text-center">Date</th>
+                                                            <th class="text-center">Total Score</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        @if (!GetTestResultsForTopic(topic.id).Any())
+                                                        {
+                                                            <tr>
+                                                                <td colspan="4" class="text-center"><em>No participants found for this topic.</em></td>
+                                                            </tr>
+                                                        }
+                                                        else
+                                                        {
+                                                            @foreach (var result in GetTestResultsForTopic(topic.id))
+                                                            {
+                                                                var participant = userManagements.FirstOrDefault(u => u.id == result.user_management_id);
+                                                                <tr>
+                                                                    <td class="text-center">@participant?.name</td>
+                                                                    <td class="text-center">@result.created_at.ToString("dd/MM/yyyy")</td>
+                                                                    <td class="text-center">@result.total_score</td>
+                                                                </tr>
+                                                            }
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private QuestionTopicVM[]? questionTopics;
+    private ScheduleVM[]? schedules;
+    private TestResultVM[]? testResults;
+    private UserManagementVM[]? userManagements;
+
+    private Dictionary<int, PieConfig> topicPieConfigs = new Dictionary<int, PieConfig>();
+    private int userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            questionTopics = await Http.GetFromJsonAsync<QuestionTopicVM[]>("http://localhost:5234/api/QuestionTopic");
+            schedules = await Http.GetFromJsonAsync<ScheduleVM[]>("http://localhost:5234/api/Schedule");
+            testResults = await Http.GetFromJsonAsync<TestResultVM[]>("http://localhost:5234/api/TestResult");
+            userManagements = await Http.GetFromJsonAsync<UserManagementVM[]>("http://localhost:5234/api/UserManagement");
+
+            userId = await GetUserIdFromClaimsAsync();
+
+            GenerateTopicCharts();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading data: {ex.Message}");
+        }
+    }
+
+    private void GenerateTopicCharts()
+    {
+        if (questionTopics == null || testResults == null)
+            return;
+
+        foreach (var topic in questionTopics)
+        {
+            var resultsForTopic = testResults.Where(tr => tr.question_topic_id == topic.id);
+
+            int passedCount = resultsForTopic.Count(tr => tr.total_score >= 70);
+            int failedCount = resultsForTopic.Count(tr => tr.total_score < 70);
+
+            var pieConfig = new PieConfig
+                {
+                    Options = new PieOptions
+                    {
+                        Responsive = true,
+                        Title = new OptionsTitle
+                        {
+                            Display = true,
+                            Text = $"Test Results for {topic.topic_name} - {topic.difficulty_level}"
+                        }
+                    }
+                };
+
+            pieConfig.Data.Labels.Add("Passed (>= 70)");
+            pieConfig.Data.Labels.Add("Failed (< 70)");
+
+            var dataset = new PieDataset<int>(new[] { passedCount, failedCount })
+                {
+                    BackgroundColor = new[] { ColorUtil.ColorHexString(0, 200, 0), ColorUtil.ColorHexString(255, 0, 0) }
+                };
+
+            pieConfig.Data.Datasets.Add(dataset);
+
+            topicPieConfigs[topic.id] = pieConfig;
+        }
+    }
+
+    private string GetTopicStatus(DateTime? endDate)
+    {
+        if (endDate == null)
+            return "Unknown"; 
+
+        if (endDate >= DateTime.Now)
+            return "Active";
+
+        return "Completed"; 
+    }
+
+    private IEnumerable<QuestionTopicVM> GetFilteredTopics()
+    {
+        return questionTopics?.Where(topic =>
+            schedules?.Any(schedule => schedule.question_topic_id == topic.id) == true) ?? Enumerable.Empty<QuestionTopicVM>();
+    }
+
+    private IEnumerable<TestResultVM> GetTestResultsForTopic(int topicId)
+    {
+        return testResults?.Where(result => result.question_topic_id == topicId) ?? Enumerable.Empty<TestResultVM>();
+    }
+
+    private async Task<int> GetUserIdFromClaimsAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        var userIdClaim = user?.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
+        return userIdClaim != null ? int.Parse(userIdClaim) : 0;
+    }
+
+    public class QuestionTopicVM
+    {
+        public int id { get; set; }
+        public string? topic_name { get; set; }
+        public string? difficulty_level { get; set; }
+    }
+
+    public class ScheduleVM
+    {
+        public int id { get; set; }
+        public int question_topic_id { get; set; }
+        public DateTime start_date { get; set; }
+        public DateTime end_date { get; set; }
+    }
+
+    public class TestResultVM
+    {
+        public int user_management_id { get; set; }
+        public int question_topic_id { get; set; }
+        public int total_score { get; set; }
+        public DateTime created_at { get; set; }
+    }
+
+    public class UserManagementVM
+    {
+        public int id { get; set; }
+        public string name { get; set; } = string.Empty;
+        public string role { get; set; } = string.Empty; 
+    }
+}

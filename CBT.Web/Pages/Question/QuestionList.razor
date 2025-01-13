@@ -1,0 +1,176 @@
+﻿@page "/QuestionList"
+
+@using Microsoft.JSInterop
+@using Microsoft.AspNetCore.Components
+
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Question List</PageTitle>
+
+<NavbarExamSetup />
+
+<div class="card mt-4">
+    <div class="card-body">
+        <div class="justify-content-between d-flex flex-row">
+            <TitleView text="Question List" />
+            <div class="d-flex flex-row">
+            <select id="filter-topic" class="form-select ms-auto me-3" @onchange="OnFilterChange">
+                @if (questionTopics != null)
+                {
+                    @foreach (var topic in questionTopics)
+                    {
+                        <option value="@topic.id" selected="@((selectedTopicId == topic.id) ? "selected" : null)">
+                            @topic.topic_name - @topic.difficulty_level
+                        </option>
+                    }
+                }
+            </select>
+            <NavLink class="nav-link card bg-light border-0 shadow-sm text-primary justify-content-center" href="QuestionForm">
+                <span class="d-flex flex-row pe-4">
+                    <i class="bi bi-plus-circle-fill me-2"></i> Add
+                </span>
+            </NavLink>
+            </div>
+        </div>
+
+        @if (filteredQuestions == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            <table class="table border mt-3">
+                <thead>
+                    <tr>
+                        <th class="text-center">Question</th>
+                        <th class="text-center">Weight</th>
+@*                         <th class="text-center">Topic</th>
+ *@                        <th class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var question in filteredQuestions)
+                    {
+                        <tr>
+                            <td>@question.question</td>
+                            <td class="text-center">@question.weight</td>
+                            @* <td class="text-center">
+                                @{
+                                    var topic = questionTopics?.FirstOrDefault(t => t.id == question.question_topic_id);
+                                    var topicDetails = topic != null
+                                    ? $"{topic.topic_name} - {topic.difficulty_level}"
+                                    : "Unknown";
+                                }
+                                @topicDetails
+                            </td> *@
+                            <td class="text-center">
+                                <span class="d-flex flex-row justify-content-center">
+                                    <NavLink class="nav-link card bg-light border-0 shadow-sm text-primary" href="@($"QuestionForm/{question.id}")">
+                                        <i class="bi bi-pencil-fill"></i>
+                                    </NavLink>
+                                    <NavLink class="nav-link card ms-2 bg-light border-0 shadow-sm text-danger" @onclick="() => ConfirmDelete(question.id)">
+                                        <i class="bi bi-trash-fill"></i>
+                                    </NavLink>
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private QuestionVM[]? questions;
+    private QuestionTopicVM[]? questionTopics;
+    private List<QuestionVM>? filteredQuestions;
+    private int selectedTopicId = 0; // Default: No filter
+
+    protected override async Task OnInitializedAsync()
+    {
+        questionTopics = await Http.GetFromJsonAsync<QuestionTopicVM[]>("http://localhost:5234/api/QuestionTopic");
+        if (questionTopics != null && questionTopics.Length > 0)
+        {
+            selectedTopicId = questionTopics[0].id; // Set default to first topic
+        }
+
+        questions = await Http.GetFromJsonAsync<QuestionVM[]>("http://localhost:5234/api/Question");
+        ApplyFilter(); // Apply filter immediately
+    }
+
+    private void OnFilterChange(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int topicId))
+        {
+            selectedTopicId = topicId;
+            ApplyFilter();
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        if (questions != null)
+        {
+            filteredQuestions = questions
+                .Where(q => q.question_topic_id == selectedTopicId)
+                .ToList();
+        }
+    }
+
+    private async Task ConfirmDelete(int? questionId)
+    {
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", "Are you sure you want to delete this question?");
+
+        if (confirmed)
+        {
+            await DeleteQuestion(questionId);
+        }
+    }
+
+    private async Task DeleteQuestion(int? questionId)
+    {
+        if (questionId.HasValue)
+        {
+            var response = await Http.DeleteAsync($"http://localhost:5234/api/Question/{questionId}");
+            if (response.IsSuccessStatusCode)
+            {
+                questions = questions?.Where(t => t.id != questionId).ToArray();
+                ApplyFilter(); // Reapply filter after deletion
+            }
+        }
+    }
+
+    public class QuestionVM
+    {
+        public int id { get; set; } = 0;
+        public string? question { get; set; }
+        public int weight { get; set; }
+        public int question_topic_id { get; set; }
+        public DateTime created_at { get; set; }
+        public DateTime? updated_at { get; set; }
+        public string? updated_by { get; set; }
+        public DateTime? deleted_at { get; set; }
+        public List<QuestionOption> question_options { get; set; } = new();
+    }
+
+    public class QuestionTopicVM
+    {
+        public int id { get; set; }
+        public string? topic_name { get; set; }
+        public string? difficulty_level { get; set; }
+    }
+
+    public class QuestionOption
+    {
+        public int id { get; set; }
+        public int question_id { get; set; }
+        public string option { get; set; } = string.Empty;
+        public bool IsCorrect { get; set; }
+        public DateTime? created_at { get; set; }
+        public DateTime? updated_at { get; set; }
+        public string? updated_by { get; set; }
+        public DateTime? deleted_at { get; set; }
+    }
+}

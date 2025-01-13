@@ -1,0 +1,45 @@
+﻿<div class="row mt-4">
+    <div class="col-xl-2 col-sm-6 col-12">
+        <div class="card mb-2 @(IsActive("QuestionTopicList") ? "active bg-light shadow" : "") text-center">
+            <NavLink class="nav-link" href="QuestionTopicList" style="color: black;">
+                <div class="mb-2">
+                    <i class="bi bi-journals fs-2"></i>
+                </div>
+                Question Topic List
+            </NavLink>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-sm-6 col-12">
+        <div class="card mb-2 @(IsActive("QuestionList") ? "active bg-light shadow" : "") text-center">
+            <NavLink class="nav-link" href="QuestionList" style="color: black;">
+                <div class="mb-2">
+                    <i class="bi bi-file-text fs-2"></i>
+                </div>
+                Question List
+            </NavLink>
+        </div>
+    </div>
+
+    <div class="col-xl-2 col-sm-6 col-12">
+        <div class="card mb-2 @(IsActive("ScheduleList") ? "active bg-light shadow" : "") text-center">
+            <NavLink class="nav-link" href="ScheduleList" style="color: black;">
+                <div class="mb-2">
+                    <i class="bi bi-calendar-week fs-2"></i>
+                </div>
+                Schedule List
+            </NavLink>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool IsActive(string pageName)
+    {
+        var uri = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Trim('/');
+        return uri.Equals(pageName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Inject]
+    private NavigationManager NavigationManager { get; set; }
+}

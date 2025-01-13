@@ -1,0 +1,104 @@
+﻿@page "/QuestionTopicForm/{id:int?}"
+
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+
+<PageTitle>Topic Form</PageTitle>
+
+<Breadcrumb BackTo="QuestionTopicList" BackToTitle="Question Topic List" CurrentPageTitle="Question Topic Form"/>
+
+<div class="card mt-4 mb-4">
+    <div class="card-body">
+        <h4 class="mt-2" style="border-bottom: solid 3px; display: inline-block;">Topic Form</h4>
+
+        @if (topic == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            <EditForm Model="topic" OnValidSubmit="HandleFormSubmit">
+                <div class="mt-3">
+                    <label>Topic Name:</label>
+                    <InputText @bind-Value="topic.topic_name" class="form-control" />
+                </div>
+                <div class="mt-3">
+                    <label>Difficulty Level:</label>
+                    <InputSelect @bind-Value="topic.difficulty_level" class="form-control">
+                        <option value="" disabled selected>Select level</option>
+                        <option value="Beginner">Beginner</option>
+                        <option value="Intermedite">Intermedite</option>
+                        <option value="Advanced">Advanced</option>
+                    </InputSelect>
+                </div>
+                <div class="mt-3">
+                    <label>Duration (In Minutes):</label>
+                    <InputText @bind-Value="topic.duration" class="form-control" oninput="this.value = this.value.replace(/[^0-9]/g, '')" />
+                </div>
+                <div class="mt-3">
+                    <label>Total Questions:</label>
+                    <InputText @bind-Value="topic.total_questions" class="form-control" oninput="this.value = this.value.replace(/[^0-9]/g, '')" />
+                </div>
+                <button type="submit" class="btn btn-primary mt-4">Submit</button>
+            </EditForm>
+        }
+    </div>
+</div>
+@code {
+    private TopicVM? topic;
+
+    [Parameter] public int? id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (id is null)
+        {
+            topic = new TopicVM();
+        }
+        else
+        {
+            await LoadTopicsAsync();
+        }
+    }
+
+    private async Task LoadTopicsAsync()
+    {
+        topic = await Http.GetFromJsonAsync<TopicVM>("http://localhost:5234/api/QuestionTopic/" + id) ?? new TopicVM();
+    }
+
+    private async Task HandleFormSubmit()
+    {
+        try
+        {
+            if (id is null)
+            {
+                await Http.PostAsJsonAsync("http://localhost:5234/api/QuestionTopic", topic);
+            }
+            else
+            {
+                await Http.PutAsJsonAsync($"http://localhost:5234/api/QuestionTopic/{id}", topic);
+            }
+
+            topic = new TopicVM(); 
+            NavigationManager.NavigateTo("/QuestionTopicList");
+        }
+        catch (Exception ex)
+        {
+            System.Console.WriteLine(ex.ToString());
+        }
+    }
+
+    private void EditTopic(TopicVM selectedTopic)
+    {
+        topic = selectedTopic; 
+    }
+
+    public class TopicVM
+    {
+        public int id { get; set; } = 0;
+        public string? topic_name { get; set; }
+        public string? difficulty_level { get; set; }
+        public string? duration { get; set; }
+        public string? total_questions { get; set; }
+    }
+}

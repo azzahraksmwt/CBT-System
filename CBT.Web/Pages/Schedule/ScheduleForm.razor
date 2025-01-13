@@ -1,0 +1,235 @@
+﻿@page "/ScheduleForm/{id:int?}"
+
+@using System.ComponentModel.DataAnnotations
+@inject HttpClient Http
+@inject NavigationManager NavigationManager
+
+<PageTitle>Schedule Form</PageTitle>
+
+<Breadcrumb BackTo="ScheduleList" BackToTitle="Schedule List" CurrentPageTitle="Schedule Form" />
+
+<div class="card mt-4 mb-4">
+    <div class="card-body">
+        <h4 class="mt-2" style="border-bottom: solid 3px; display: inline-block;">Schedule Form</h4>
+
+        @if (errorMessage != null)
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+
+        @if (schedule == null || questionTopics == null || existingSchedules == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            <EditForm Model="schedule" OnValidSubmit="HandleFormSubmit">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="mt-3">
+                    <label>Topic:</label>
+                    <InputSelect @bind-Value="schedule.question_topic_id" class="form-control" @onchange="ValidateDuplicateTopic">
+                        <option value="" disabled>Select a topic</option>
+                        @foreach (var topic in questionTopics)
+                        {
+                            <option value="@topic.id">@topic.topic_name - @topic.difficulty_level</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="@(() => schedule.question_topic_id)" />
+                </div>
+
+                <div class="mt-3">
+                    <label>Start Date:</label>
+                    <InputDate @bind-Value="schedule.start_date" class="form-control" />
+                    <ValidationMessage For="@(() => schedule.start_date)" />
+                </div>
+
+                <div class="mt-3">
+                    <label>End Date:</label>
+                    <InputDate @bind-Value="schedule.end_date" class="form-control" />
+                    <ValidationMessage For="@(() => schedule.end_date)" />
+                </div>
+
+                <button type="submit" class="btn btn-primary mt-4">Submit</button>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    private ScheduleVM? schedule;
+    private List<QuestionTopicVM>? questionTopics;
+    private List<ScheduleVM>? existingSchedules;
+    private string? errorMessage;
+
+    [Parameter] public int? id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadQuestionTopicsAsync();
+            await LoadExistingSchedulesAsync();
+
+            if (id is null)
+            {
+                schedule = new ScheduleVM
+                    {
+                        start_date = DateTime.Now,
+                        end_date = DateTime.Now
+                    };
+            }
+            else
+            {
+                await LoadScheduleAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error initializing form: {ex.Message}";
+        }
+    }
+
+    private async Task LoadQuestionTopicsAsync()
+    {
+        try
+        {
+            questionTopics = await Http.GetFromJsonAsync<List<QuestionTopicVM>>("http://localhost:5234/api/QuestionTopic");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading topics: {ex.Message}";
+            questionTopics = new List<QuestionTopicVM>();
+        }
+    }
+
+    private async Task LoadExistingSchedulesAsync()
+    {
+        try
+        {
+            existingSchedules = await Http.GetFromJsonAsync<List<ScheduleVM>>("http://localhost:5234/api/Schedule");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading existing schedules: {ex.Message}";
+            existingSchedules = new List<ScheduleVM>();
+        }
+    }
+
+    private async Task LoadScheduleAsync()
+    {
+        try
+        {
+            schedule = await Http.GetFromJsonAsync<ScheduleVM>($"http://localhost:5234/api/Schedule/{id}") ?? new ScheduleVM();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error loading schedule: {ex.Message}";
+            schedule = new ScheduleVM();
+        }
+    }
+
+    private void ValidateDuplicateTopic(ChangeEventArgs e)
+    {
+        if (e.Value is not null && int.TryParse(e.Value.ToString(), out var topicId))
+        {
+            // Validasi untuk memastikan tidak ada duplikasi
+            var isDuplicateTopic = existingSchedules?.Any(s =>
+                s.question_topic_id == topicId &&
+                (id == null || s.id != id)) ?? false;
+
+            errorMessage = isDuplicateTopic
+                ? "This topic is already scheduled. Please choose a different topic."
+                : null;
+        }
+        else
+        {
+            errorMessage = null;
+        }
+    }
+
+    private async Task HandleFormSubmit()
+    {
+        try
+        {
+            // Validasi tanggal
+            if (schedule.start_date > schedule.end_date)
+            {
+                errorMessage = "Start Date cannot be later than End Date.";
+                return;
+            }
+
+            // Validasi duplikasi topic
+            var isDuplicateTopic = existingSchedules?.Any(s =>
+                s.question_topic_id == schedule.question_topic_id &&
+                (id == null || s.id != id)) ?? false;
+
+            if (isDuplicateTopic)
+            {
+                errorMessage = "Cannot submit form. The selected topic is already scheduled.";
+                return;
+            }
+
+            HttpResponseMessage response;
+            if (id is null) // Jika data baru
+            {
+                response = await Http.PostAsJsonAsync("http://localhost:5234/api/Schedule", schedule);
+            }
+            else // Jika update
+            {
+                response = await Http.PutAsJsonAsync($"http://localhost:5234/api/Schedule/{id}", schedule);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errorMessage = $"Error saving schedule: {response.ReasonPhrase}";
+                return;
+            }
+
+            // Ambil ID yang baru jika data baru disimpan
+            if (id is null)
+            {
+                var createdSchedule = await response.Content.ReadFromJsonAsync<ScheduleVM>();
+                schedule.id = createdSchedule?.id ?? 0;
+            }
+
+            // Setelah ID yang valid, kirim notifikasi email
+            var notificationResponse = await Http.PostAsync(
+                $"http://localhost:5234/api/email/send-schedule-notification?scheduleId={schedule.id}", null);
+
+            if (!notificationResponse.IsSuccessStatusCode)
+            {
+                errorMessage = "Schedule saved, but email notification failed.";
+                return;
+            }
+
+            NavigationManager.NavigateTo("/ScheduleList");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error submitting form: {ex.Message}";
+        }
+    }
+
+    public class ScheduleVM
+    {
+        public int id { get; set; } = 0;
+
+        [Required(ErrorMessage = "Topic is required.")]
+        public int question_topic_id { get; set; }
+
+        [Required(ErrorMessage = "Start Date is required.")]
+        public DateTime start_date { get; set; }
+
+        [Required(ErrorMessage = "End Date is required.")]
+        public DateTime end_date { get; set; }
+    }
+
+    public class QuestionTopicVM
+    {
+        public int id { get; set; } = 0;
+        public string? topic_name { get; set; }
+        public string? difficulty_level { get; set; }
+    }
+}

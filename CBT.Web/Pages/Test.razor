@@ -1,0 +1,315 @@
+﻿@page "/Test/{id:int}"
+
+@implements IDisposable
+
+@using Microsoft.AspNetCore.Components
+@using System.Net.Http.Json
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.IdentityModel.Tokens.Jwt
+@inject HttpClient Http
+@inject NavigationManager Navigation
+
+<Breadcrumb BackTo="Dashboard" BackToTitle="Dashboard" CurrentPageTitle="Test" />
+
+<div class="card mt-2">
+    <div class="card-body">
+        @if (PaginatedQuestions == null || PaginatedQuestions.Count == 0)
+        {
+            <p><em>Loading questions...</em></p>
+        }
+        else
+        {
+            @foreach (var question in PaginatedQuestions.Select((q, index) => new { q, index }))
+            {
+                <div class="d-flex flex-row justify-content-between">
+                    <h4 class="mt-2" style="border-bottom: solid 3px; display: inline-block;">@TopicName - @DifficultyLevel (@((currentPage + 1).ToString())/@questions.Count)</h4>
+                    <div class="text-end mt-2">
+                        <span class="badge bg-danger">
+                            Time Remaining: @TimeSpan.FromSeconds(remainingTime).ToString(@"mm\:ss")
+                        </span>
+                    </div>
+                </div>
+
+                <div class="py-2 mt-3 h5">
+                    <b>@(currentPage * itemsPerPage + question.index + 1). @question.q.question</b>
+                </div>
+
+                @foreach (var option in question.q.question_options)
+                {
+                    <div class="form-check mb-2">
+                        <input class="form-check-input"
+                               type="radio"
+                               name="question_@question.q.id"
+                               id="option_@option.id"
+                               checked="@(Result.test_result_history.Any(h => h.question_id == question.q.id && h.question_option_id == option.id))"
+                               @onchange="() => RecordAnswer(question.q.id, option.id, option.IsCorrect, question.q.weight)" />
+                        <label class="form-check-label" for="option_@option.id">
+                            @option.option
+                        </label>
+                    </div>
+                }
+            }
+        }
+    </div>
+</div>
+
+<div class="mt-3">
+    @if (!IsLastPage)
+    {
+        <button class="btn btn-secondary" @onclick="GoToPreviousPage" disabled="@IsPreviousPageDisabled">Previous</button>
+        <button class="btn btn-secondary" @onclick="GoToNextPage" disabled="@IsNextPageDisabled">Next</button>
+    }
+    else
+    {
+        <button class="btn btn-secondary" @onclick="GoToPreviousPage" disabled="@IsPreviousPageDisabled">Previous</button>
+        <button class="btn btn-success" @onclick="SubmitTestResult">Submit</button>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int id { get; set; }
+
+    private List<QuestionVM> questions = new();
+    private int currentPage = 0;
+    private int itemsPerPage = 1;
+    private string TopicName { get; set; } = string.Empty;
+    private string DifficultyLevel { get; set; } = string.Empty;
+    private TestResultVM Result = new TestResultVM { test_result_history = new List<TestResultHistoryVM>() };
+    private int remainingTime;
+    private Timer? timer;
+
+    [Inject] private AuthenticationStateProvider AuthenticationStateProvider { get; set; }
+
+    private List<QuestionVM> PaginatedQuestions => questions
+        .Skip(currentPage * itemsPerPage)
+        .Take(itemsPerPage)
+        .ToList();
+
+    private bool IsPreviousPageDisabled => currentPage == 0;
+    private bool IsNextPageDisabled => currentPage == (questions.Count / itemsPerPage);
+    private bool IsLastPage => currentPage == (int)Math.Ceiling((double)questions.Count / itemsPerPage) - 1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (id != 0)
+        {
+            var apiUrl = $"http://localhost:5234/api/QuestionTopic/{id}";
+            var topic = await Http.GetFromJsonAsync<QuestionTopicVM>(apiUrl);
+
+            if (topic != null)
+            {
+                TopicName = topic.topic_name;
+                DifficultyLevel = topic.difficulty_level;
+
+                // Ambil jumlah total_questions dari topik
+                int totalQuestions = int.TryParse(topic.total_questions, out int parsedTotalQuestions)
+                    ? parsedTotalQuestions
+                    : topic.questions.Count;
+
+                // Pilih secara acak sejumlah soal
+                var random = new Random();
+                questions = topic.questions
+                    .OrderBy(_ => random.Next())
+                    .Take(totalQuestions)
+                    .Select(q => new QuestionVM
+                        {
+                            id = q.id,
+                            question = q.question,
+                            weight = q.weight,
+                            question_options = q.question_options.Select(qo => new QuestionOptionVM
+                            {
+                                id = qo.id,
+                                option = qo.option,
+                                IsCorrect = qo.IsCorrect
+                            }).ToList()
+                        }).ToList();
+
+                if (int.TryParse(topic.duration, out int durationInMinutes))
+                {
+                    remainingTime = durationInMinutes * 60;
+                }
+                else
+                {
+                    remainingTime = 0;
+                }
+
+                StartTimer();
+            }
+        }
+    }
+
+    private void StartTimer()
+    {
+        timer = new Timer(async _ =>
+        {
+            if (remainingTime > 0)
+            {
+                remainingTime--;
+                InvokeAsync(StateHasChanged); 
+            }
+            else
+            {
+                await AutoSubmitTest(); 
+            }
+        }, null, 1000, 1000);
+    }
+
+    private void StopTimer()
+    {
+        timer?.Dispose();
+        timer = null;
+    }
+
+    private async Task AutoSubmitTest()
+    {
+        StopTimer();
+
+        foreach (var question in questions)
+        {
+            if (!Result.test_result_history.Any(h => h.question_id == question.id))
+            {
+                Result.test_result_history.Add(new TestResultHistoryVM
+                    {
+                        question_id = question.id,
+                        question_option_id = 0, 
+                        IsCorrect = false, 
+                        weight = question.weight
+                    });
+            }
+        }
+
+        await SubmitTestResult(); 
+    }
+
+    public void Dispose()
+    {
+        StopTimer(); 
+    }
+
+    private void RecordAnswer(int questionId, int optionId, bool isCorrect, int weight)
+    {
+        var existingHistory = Result.test_result_history.FirstOrDefault(h => h.question_id == questionId);
+
+        if (existingHistory != null)
+        {
+            existingHistory.question_option_id = optionId;
+            existingHistory.IsCorrect = isCorrect;
+            existingHistory.weight = weight;
+        }
+        else
+        {
+            Result.test_result_history.Add(new TestResultHistoryVM
+                {
+                    question_id = questionId,
+                    question_option_id = optionId,
+                    IsCorrect = isCorrect,
+                    weight = weight
+                });
+        }
+    }
+
+    private void GoToPreviousPage()
+    {
+        if (currentPage > 0)
+        {
+            currentPage--;
+        }
+    }
+
+    private void GoToNextPage()
+    {
+        int maxPage = (int)Math.Ceiling((double)questions.Count / itemsPerPage) - 1;
+        if (currentPage < maxPage)
+        {
+            currentPage++;
+        }
+    }
+
+    private async Task<int> GetUserIdFromClaims()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        var userIdClaim = user?.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
+        return userIdClaim != null ? int.Parse(userIdClaim) : 0;
+    }
+
+    private async Task SubmitTestResult()
+    {
+        int userId = await GetUserIdFromClaims();
+
+        Result.user_management_id = userId;
+        Result.question_topic_id = id;
+        Result.correct_score = Result.test_result_history.Count(h => h.IsCorrect);
+        Result.incorrect_score = Result.test_result_history.Count(h => !h.IsCorrect);
+
+        Result.total_bobot = Result.test_result_history.Sum(h => h.weight);
+
+        if (Result.total_bobot > 0)
+        {
+            var total_correct_weight = Result.test_result_history
+                .Where(h => h.IsCorrect)
+                .Sum(h => h.weight);
+
+            Result.total_score = (total_correct_weight * Result.max_score) / Result.total_bobot;
+        }
+
+        var apiUrl = "http://localhost:5234/api/TestResult";
+        var response = await Http.PostAsJsonAsync(apiUrl, Result);
+
+        if (response.IsSuccessStatusCode)
+        {
+            Console.WriteLine("Test result submitted successfully.");
+            Navigation.NavigateTo("/Dashboard");
+        }
+        else
+        {
+            Console.WriteLine("Failed to submit test result.");
+        }
+    }
+
+    public class TestResultVM
+    {
+        public int question_topic_id { get; set; }
+        public int user_management_id { get; set; }
+        public int correct_score { get; set; } = 0;
+        public int incorrect_score { get; set; } = 0;
+        public int total_score { get; set; } = 0;
+        public int total_bobot { get; set; } = 0;
+        public int max_score { get; set; } = 100;
+        public List<TestResultHistoryVM> test_result_history { get; set; }
+    }
+
+    public class TestResultHistoryVM
+    {
+        public int question_id { get; set; }
+        public int question_option_id { get; set; }
+        public bool IsCorrect { get; set; }
+        public int weight { get; set; }
+    }
+
+    public class QuestionVM
+    {
+        public int id { get; set; }
+        public string question { get; set; }
+        public int weight { get; set; }
+        public List<QuestionOptionVM> question_options { get; set; }
+    }
+
+    public class QuestionOptionVM
+    {
+        public int id { get; set; }
+        public string option { get; set; }
+        public bool IsCorrect { get; set; }
+    }
+
+    public class QuestionTopicVM
+    {
+        public string topic_name { get; set; }
+        public string difficulty_level { get; set; }
+        public string duration { get; set; }
+        public string total_questions { get; set; }
+        public List<QuestionVM> questions { get; set; }
+    }
+}

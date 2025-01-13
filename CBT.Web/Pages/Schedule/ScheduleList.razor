@@ -1,0 +1,117 @@
+﻿@page "/ScheduleList"
+
+@using Microsoft.JSInterop
+@using Microsoft.AspNetCore.Components
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Schedule List</PageTitle>
+
+<NavbarExamSetup/>
+
+<div class="card mt-4">
+    <div class="card-body">
+        <div class="justify-content-between d-flex flex-row">
+            <TitleView text="Schedule List" />
+            <NavLink class="nav-link card bg-light border-0 shadow-sm text-primary justify-content-center" href="ScheduleForm">
+                <span class="d-flex flex-row">
+                    <i class="bi bi-plus-circle-fill me-2"></i> Add
+                </span>
+            </NavLink>
+        </div>
+
+        @if (schedules == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else
+        {
+            <table class="table border mt-3">
+                <thead>
+                    <tr>
+                        <th class="text-center">Topic</th>
+                        <th class="text-center">Start Date</th>
+                        <th class="text-center">End Date</th>
+                        <th class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var schedule in schedules)
+                    {
+                        <tr>
+                            <td>
+                                @{
+                                    var topic = questionTopics?.FirstOrDefault(t => t.id == schedule.question_topic_id);
+                                    var topicDetails = topic != null
+                                    ? $"{topic.topic_name} - {topic.difficulty_level}"
+                                    : "Unknown";
+                                }
+                                @topicDetails
+                            </td>
+                            <td class="text-center">@schedule.start_date.ToString("dd/MM/yyyy")</td>
+                            <td class="text-center">@schedule.end_date.ToString("dd/MM/yyyy")</td>
+                            <td class="text-center">
+                                <span class="d-flex flex-row justify-content-center">
+                                    <NavLink class="nav-link card bg-light border-0 shadow-sm text-primary" href="@($"ScheduleForm/{schedule.id}")">
+                                        <i class="bi bi-pencil-fill"></i>
+                                    </NavLink>
+                                    <NavLink class="nav-link card ms-2 bg-light border-0 shadow-sm text-danger" @onclick="() => ConfirmDelete(schedule.id)">
+                                        <i class="bi bi-trash-fill"></i>
+                                    </NavLink>
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private ScheduleVM[]? schedules;
+    private QuestionTopicVM[]? questionTopics;
+
+    protected override async Task OnInitializedAsync()
+    {
+        schedules = await Http.GetFromJsonAsync<ScheduleVM[]>("http://localhost:5234/api/Schedule");
+        questionTopics = await Http.GetFromJsonAsync<QuestionTopicVM[]>("http://localhost:5234/api/QuestionTopic");
+    }
+
+    private async Task ConfirmDelete(int? scheduleId)
+    {
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", "Are you sure you want to delete this schedule?");
+
+        if (confirmed)
+        {
+            await DeleteSchedule(scheduleId);
+        }
+    }
+
+    private async Task DeleteSchedule(int? scheduleId)
+    {
+        if (scheduleId.HasValue)
+        {
+            var response = await Http.DeleteAsync($"http://localhost:5234/api/Schedule/{scheduleId}");
+            if (response.IsSuccessStatusCode)
+            {
+                schedules = schedules.Where(t => t.id != scheduleId).ToArray();
+            }
+        }
+    }
+
+    public class ScheduleVM
+    {
+        public int id { get; set; } = 0;
+        public int question_topic_id { get; set; }
+        public DateTime start_date { get; set; }
+        public DateTime end_date { get; set; }
+    }
+
+    public class QuestionTopicVM
+    {
+        public int id { get; set; } = 0;
+        public string? topic_name { get; set; }
+        public string? difficulty_level { get; set; }
+    }
+}

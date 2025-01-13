@@ -1,0 +1,122 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@using System.IdentityModel.Tokens.Jwt
+@inject HttpClient Http
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">CBT.Web</a>
+        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+    </div>
+</div>
+
+<div class="@NavMenuCssClass nav-scrollable" @onclick="ToggleNavMenu">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="Dashboard">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Dashboard
+            </NavLink>
+        </div>
+
+        @* Menambahkan logika untuk mengambil role berdasarkan userId *@
+        @if (userManagements != null)
+        {
+            var user = userManagements.FirstOrDefault(u => u.id == userId);
+            var userRole = user?.role;
+
+            if (userRole == "educator")
+            {
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="QuestionTopicList">
+                        <span class="bi bi-gear-wide-connected-nav-menu" aria-hidden="true"></span> Examination Setup
+                    </NavLink>
+                </div>
+            }
+        }
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="ProfileForm">
+                <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> Profile
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-arrow-left-square-fill-nav-menu" aria-hidden="true"></span> Logout
+            </NavLink>
+        </div>
+        @*
+        <div class="nav-item px-3">
+        <NavLink class="nav-link" href="QuestionTopicList">
+        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Question Topic List
+        </NavLink>
+        </div>
+        <div class="nav-item px-3">
+        <NavLink class="nav-link" href="QuestionList">
+        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Question List
+        </NavLink>
+        </div>
+        <div class="nav-item px-3">
+        <NavLink class="nav-link" href="ScheduleList">
+        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Schedule List
+        </NavLink>
+        </div>
+        *@
+        @*
+        <div class="nav-item px-3">
+        <NavLink class="nav-link" href="counter">
+        <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
+        </NavLink>
+        </div>
+        <div class="nav-item px-3">
+        <NavLink class="nav-link" href="weather">
+        <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
+        </NavLink>
+        </div>
+        *@
+    </nav>
+</div>
+
+@code {
+    private bool collapseNavMenu = true;
+    private UserManagementVM[]? userManagements;
+    private int userId;
+
+    private string? NavMenuCssClass => collapseNavMenu ? "collapse" : null;
+
+    [Inject] private AuthenticationStateProvider AuthenticationStateProvider { get; set; }
+
+    private void ToggleNavMenu()
+    {
+        collapseNavMenu = !collapseNavMenu;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            userManagements = await Http.GetFromJsonAsync<UserManagementVM[]>("http://localhost:5234/api/UserManagement");
+            userId = await GetUserIdFromClaims(); // Memanggil metode yang benar
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading data: {ex.Message}");
+        }
+    }
+
+    private async Task<int> GetUserIdFromClaims()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        var userIdClaim = user?.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Sub)?.Value;
+        return userIdClaim != null ? int.Parse(userIdClaim) : 0;
+    }
+
+    public class UserManagementVM
+    {
+        public int id { get; set; }
+        public string name { get; set; } = string.Empty;
+        public string role { get; set; } = string.Empty;
+    }
+}
